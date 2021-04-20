@@ -62,7 +62,9 @@ function send(uint chainId, address app, byte[] message, address hop) {
 
 ℹ️ We've one imaginary **OFFCHAIN** entity for picking events emitted from `Highway` running on **C1** & reliably passing it to `Highway` running on **C2**, which is nothing but **hop**. How exactly these **OFFCHAIN** entities work, is a blackbox to us, as of now. We'll work on their specification, once we're done with **ONCHAIN** entities.
 
-For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by `Highway`'s trusted oracle. This oracle is an **OFFCHAIN** entity, which will only sign message to be passed, after verifying occurance of event on **C1**. `Highway` on **C2** only processes message, if it finds valid signature from its oracle.
+For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by `Highway`'s trusted oracle. This oracle is an **OFFCHAIN** entity, which will only sign message to be passed, after verifying occurance of event on **C1**. `Highway` on **C2** only processes message, if it finds valid signature from its oracle. 
+
+> It doesn't process same message more than once, by checking respective nonce of message.
 
 ---
 
@@ -92,6 +94,8 @@ function receive(...) {
 Now it'll verify signature, to check whether its oracle has signed received message or not. For doing so, it'll first construct message which was signed by oracle.
 
 ```js
+var oracle = 0x<addr> // Truested party for gateway contract
+
 function receive(...) {
     var message = serialize({
         sourceChainId,
@@ -104,94 +108,20 @@ function receive(...) {
     }) // C2's built-in function for serializing object into byte array
 
     if getSigner(message, signed) != oracle {
-        // signature match didn't pass
+        // signature verification didn't pass
         return
     }
     // proceed
 }
 ```
 
+> `serialize(...)` is same as what's used by **C2**'s oracle for serializing parts & signing message. **❗️ If not, signature verification won't work. ❗️**
+
 It's obvious that receiving side also should keep some state for checking orderliness of messages received from sender.
 
 Proposed data structure looks like
 
-```js
-var state = allocate(map[address]map[uint]map[address]uint)
-```
-
-First we start by checking whether this message is for this chain or not
-
-```js
-var chainId = getChainId() // C2's built-in function
-if chainId != targetChainId {
-    // not for us
-    return
-}
-// proceed
-```
-
-We can now try to see if this is first time **A2** is receiving message from outside world or not, which can be done via this look up
-
-```js
-var _, ok = state[A2]
-if ok {
-    // not first time
-} else {
-    // it's first time
-}
-```
-
-If **YES**, we need to create some entries, before performing orderliness check
-
-```js
-state[A2] = allocate(map[uint]map[address]uint)
-state[A2][sourceChainId] = allocate(map[address]uint)
-
-var expectedNonce = state[A2][sourceChainId][sourceApp] // default value 0
-if expectedNonce != nonce {
-    // ordering not being respected
-    return
-}
-// we go to next step
-```
-
-If **NO**, we'll try to find if it's first time **A2** receiving message from `sourceChainId`, which can be done by
-
-```js
-var _, ok = state[A2][sourceChainId]
-if ok {
-    // not first time
-} else {
-    // yes it's
-}
-```
-
-
-If **YES**, we create an entry for future usage, after that we'll do our usual orderliness check
-
-```js
-state[A2][sourceChainId] = allocate(map[address]uint)
-
-var expectedNonce = state[A2][sourceChainId][sourceApp]
-if expectedNonce != nonce {
-    // ordering not being respected
-    return
-}
-// we go to next step
-```
-
-If **NO**, we directly lookup expected nonce for this combination
-
-```js
-var expectedNonce = state[A2][sourceChainId][sourceApp]
-if expectedNonce != nonce {
-    // ordering not being respected
-    return
-}
-
-// incrementing expected nonce, for next message
-state[A2][sourceChainId][sourceApp]++
-```
+![data_structure_receiver](./sc/data_structure_receiver.jpg)
 
 If orderliness is tested to be passing, `Highway` will invoke `onReceive` method of **A2** running on **C2**.
 
