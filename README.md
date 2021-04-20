@@ -1,5 +1,7 @@
 # highway
-Cross Blockchain Message Passing Framework
+Cross Blockchain Message Passing Protocol
+
+![architecture](./sc/architecture.jpg)
 
 ## Motivation
 
