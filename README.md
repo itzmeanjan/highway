@@ -42,65 +42,7 @@ For emitting event of aforementioned form, we need to hold some state in `Highwa
 
 For each dApp, on any possible chain _( != **C1** )_, to which any application on **C1** might ever want to send message, we're keeping some state using following data structure
 
-```js
-var state = allocate(map[address]map[uint]map[address]uint)
-```
-
-> `allocate(...)` only allocates space for top level associative array, if it's a nested structure.
-
-Ok, let's split this data structure into it's components & see what each level serves.
-
-**Flow :**
-
-When **A1** invoked `Highway.send(uint chainId, address app, byte[] message, address hop)`, we start by finding out if **A1** has ever attempted to send any message to outer world or not. This can be done by doing a O(1) look up
-
-```js
-var _, ok = state[A1]
-if ok {
-    // yes it tried
-} else {
-    // no, first attempt
-}
-```
-
-If **NO**, we're creating following entries
-
-```js
-state[A1] = allocate(map[uint]map[address]uint)
-state[A1][chainId] = allocate(map[address]uint)
-
-var nonce = state[A1][chainId][app] // default value 0
-state[A1][chainId][app]++
-```
-
-If **YES**, we'll look up if **A1** ever tried to send message to `chainId` or not, which can be done by looking up
-
-```js
-var _, ok = state[A1][chainId]
-if ok {
-    // yes, it did
-} else {
-    // no, it didn't, first attempt to `chainId`
-}
-```
-
-If **NO**, we'll create an entry for `chainId`
-
-```js
-state[A1][chainId] = allocate(map[address]uint)
-
-var nonce = state[A1][chainId][app]
-state[A1][chainId][app]++
-```
-
-If **YES**, we'll lookup respective nonce
-
-```js
-var nonce = state[A1][chainId][app]
-state[A1][chainId][app]++ // for next message
-```
-
-So we've finally figured out `nonce` to be used for emitting event
+![data_structure_sender](./sc/data_structure_sender.jpg)
 
 ```js
 function send(uint chainId, address app, byte[] message, address hop) {
@@ -109,7 +51,7 @@ function send(uint chainId, address app, byte[] message, address hop) {
     var sourceApp = getSenderAddress() // C1's built-in function
     var targetChainId = chainId
     var targetApp = app
-    var nonce = ... // we just figured it out
+    var nonce = ... // figure it out
 
     emit Message(sourceChainId, sourceApp, hop, targetChainId, targetApp, nonce, message) // voila 🎉
 
