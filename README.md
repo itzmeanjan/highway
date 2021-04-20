@@ -5,11 +5,9 @@ Cross Blockchain Message Passing Protocol
 
 ## Motivation
 
-We're living in a time when new blockchain(s) popping up every single day & we've our assets distributed across all those self-sovereign chains, each using similar/ different mechanism for reaching consensus.
+We're living in a time when new blockchain(s) popping up every single day, due to ease of accessibility to great framework(s) for creating chains. We've our assets now distributed across all those self-sovereign chains, each using some mechanism for reaching consensus. Some times these assets are not desired to be kept confined on a single chain rather they're intended to be moving across several chains seamlessly.
 
 This project is an attempt in creating a generic framework for passing arbitrary messages in between applications running on two different chains. These applications are distributed in nature, but their state is not necessarily shared across multiple chains. This project will attempt to standardise some interfaces so that dApps running on different chains can talk to their peers over a reliable, ordered, authentic channel.
-
-In future date contributors can add support for more chains, following specification defined below, for reliably passing ordered, authenticated messages between a pair of chains. This enables users of this framework to distribute their application state across two or more different chains & build some interesting projects.
 
 > One thing I'd like to clear, this project doesn't think any chain as **root chain ( i.e. L1 ) / child chain ( i.e. L2 )**, rather every participating chain is considered to be operating independently.
 
@@ -47,11 +45,13 @@ For each dApp, on any possible chain _( != **C1** )_, to which any application o
 ```js
 function send(uint chainId, address app, byte[] message, address hop) {
 
+    // -- book keeping, starts
     var sourceChainId = getChainId() // C1's built-in function
     var sourceApp = getSenderAddress() // C1's built-in function
     var targetChainId = chainId
     var targetApp = app
-    var nonce = ... // figure it out
+    var nonce = ... // figure it out from state keeper nested associative array
+    // -- book keeping done
 
     emit Message(sourceChainId, sourceApp, hop, targetChainId, targetApp, nonce, message) // voila 🎉
 
@@ -62,7 +62,7 @@ function send(uint chainId, address app, byte[] message, address hop) {
 
 ℹ️ We've one imaginary **OFFCHAIN** entity for picking events emitted from `Highway` running on **C1** & reliably passing it to `Highway` running on **C2**, which is nothing but **hop**. How exactly these **OFFCHAIN** entities work, is a blackbox to us, as of now. We'll work on their specification, once we're done with **ONCHAIN** entities.
 
-For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by `Highway`'s trusted oracle. This oracle is an **OFFCHAIN** entity, which will only sign message to be passed, after verifying occurance of event on **C1**. `Highway` on **C2** only processes message, if it finds valid signature from its oracle. 
+For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by `Highway`'s trusted oracle. This oracle is an **OFFCHAIN** entity, which will only sign message to be passed, after verifying occurance of event on **C1**. `Highway` on **C2** only processes message, if it finds valid signature from its oracle, on a correctly ordered message.
 
 > It doesn't process same message more than once, by checking respective nonce of message.
 
@@ -138,6 +138,44 @@ function onReceive(uint chainId, address app, address hop, byte[] message) {
 
 ---
 
-> **Batching, being considered, for reducing number of round trips**
+## OffChain Entity
+
+Now we'll define specification for how events emitted by **A1** running on **C1** are caught by **OFFCHAIN** entities & reliably sent to `Highway.receive(...)` running on **C2**, which eventually passes it to **A2**.
+
+---
+
+You might have already seen field `hop` in `Highway.send(...)` method, which is the address of party designated to do following steps
+
+- Pick this event from tx **T1** included in block **B1** of chain **C1**
+- Send this message to `C2.Highway`'s trusted oracle, to verify & sign it
+    - `C2.Highway`'s oracle is one **OFFCHAIN** entity trusted by `C2.Highway`, for verifying inclusion of tx **T1** in block **B1** of chain **C1**, while also checking _metadata & content_ of message being sent cross-chain, before signing it
+- Signed message & original message is sent to `C2.Highway`'s `receive()` method
+
+**⭐️ Now I'm going to propose two models**
+
+- Push Model
+- Pull Model
+
+Let's talk more about them to understand how are they important for our protocol.
+
+### Push Model
+
+When **A1** running on **C1** attempted to send message to outer world, **OFFCHAIN** entity continuously monitoring `C1.Highway`'s event log can pick it up & send it to `C2.Highway`'s trusted oracle for verification & signing. After it's done, it'll invoke `C2.Highway.receive(...)` & get message processed.
+
+I call it **PUSH** based, because **OFFCHAIN** entity has kind of an aggressive tendency of delivering messages between chains. This is an acceptable scenario when **C2** is a chain which has low tx cost.
+
+### Pull Model
+
+You might have already guessed what it's going to be. 
+
+This time `hop` may not be an automated aggressive program, rather it's someone who is in need of transferring that message from **C1 -> C2**.
+
+Let's take an example. Say, **C1** is so-called L2-chain & **C2** is Ethereum Network. **A1**'s user **U1** has an interest of transferring some asset it owns to **A2** counterpart of dApp _( distributed across chains )_.
+
+So **A1** invokes `C1.Highway.send()` with `hop` address set to `U1` & let `U1` do all aforementioned steps for successfully passing message to **A2** on **C2** i.e. Ethereum Network.
+
+I call it **PULL** based mechanism, because here `U1` plays role of **OFFCHAIN** entity, by pulling message(s) of its interest & passing it to `C2.Highway.receive(...)`.
+
+This is a suitable model, when you might not want to pay high tx cost of **C2**.
 
 > **Specification writing in progress**
