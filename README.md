@@ -41,7 +41,7 @@ For emitting event of aforementioned form, we need to hold some state in `Highwa
 For each dApp, on any possible chain _( != **C1** )_, to which any application on **C1** might ever want to send message, we're keeping some state using following data structure
 
 ```js
-var state = allocate(map[address]map[uint]map[address]uint) // allocates memory for top level associative array
+var state = allocate(map[address]map[uint]map[address]uint)
 ```
 
 > `allocate(...)` only allocates space for top level associative array, if it's a nested structure.
@@ -118,27 +118,53 @@ function send(uint chainId, address app, byte[] message, address hop) {
 
 ℹ️ We've one imaginary **OFFCHAIN** entity for picking events emitted from `Highway` running on **C1** & reliably passing it to `Highway` running on **C2**, which is nothing but **hop**. How exactly these **OFFCHAIN** entities work, is a blackbox to us, as of now. We'll work on their specification, once we're done with **ONCHAIN** entities.
 
-For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**.
-
-You can also think, sender has an interest in sending message from **C1** -> **C2** & it belives `hop` i.e. **OFFCHAIN** entity can help it in doing so. Though that's not only based on what **C2** will accept message from `hop`, it'll explicitly verify it using it's own oracle, which will check with **C1** itself.
+For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by `Highway`'s trusted oracle. This oracle is an **OFFCHAIN** entity, which will only sign message to be passed, after verifying occurance of event on **C1**. `Highway` on **C2** only processes message, if it finds valid signature from its oracle.
 
 ---
 
 Let's now step-by-step go through what happens, when `Highway` on **C2** receives message sent by **A1** of **C1**, in form
 
 ```js
-receive(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message)
+function receive(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message, byte[] signed) {
+
+    // ...
+
+}
 ```
 
 First it'll check whether it's `hop` who has invoked method or not
 
 ```js
-var invoker = getSenderAddress() // C2's built-in function
-if invoker != hop {
-    // only hop should do it
-    return
+function receive(...) {
+    var invoker = getSenderAddress() // C2's built-in function
+    if invoker != hop {
+        // only hop should do it
+        return
+    }
+    // proceed
 }
-// proceed
+```
+
+Now it'll verify signature, to check whether its oracle has signed received message or not. For doing so, it'll first construct message which was signed by oracle.
+
+```js
+function receive(...) {
+    var message = serialize({
+        sourceChainId,
+        sourceApp,
+        hop,
+        targetChainId,
+        targetApp,
+        nonce,
+        message
+    }) // C2's built-in function for serializing object into byte array
+
+    if getSigner(message, signed) != oracle {
+        // signature match didn't pass
+        return
+    }
+    // proceed
+}
 ```
 
 It's obvious that receiving side also should keep some state for checking orderliness of messages received from sender.
@@ -223,53 +249,18 @@ if expectedNonce != nonce {
 state[A2][sourceChainId][sourceApp]++
 ```
 
-If orderliness is tested to be passing, `Highway` will ask its oracle to verify this message on source chain, by invoking
+If orderliness is tested to be passing, `Highway` will invoke `onReceive` method of **A2** running on **C2**.
 
 ```js
-function verify(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message) {
-    
-    emit Verify(sourceChainId, sourceApp, hop, targetChainId, targetApp, nonce, message)
+function onReceive(uint chainId, address app, address hop, byte[] message) {
+
+    // ...
+    // A2 ( on C2 ) can now process this message from A1 ( on C1 )
+    //
+    // These messages are received in ordered, authenticated, verified form
 
 }
 ```
-
-Also note, `Highway` must keep this message in a queue, which is due verification.
-
-```js
-var queue = allocate(map[address]map[uint]map[address]map[uint][]byte)
-
-function keep(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message) {
-
-    queue[targetApp][sourceChainId][sourceApp][nonce] = message
-
-}
-```
-
----
-
-ℹ️ Again, another **OFFCHAIN** entity has come into picture, which is treated as trusted oracle & tasked to verify whether message was really sent by **A1** on **C1** ( via gateway `Highway` ) i.e. transaction **T1** is included in block **B1** of **C1** or not.
-
-Answer to be submitted by **OFFCHAIN_ORACLE** oracle, by invoking `verified(...)`
-
----
-
-Boolean result to be submitted by **OFFCHAIN_ORACLE**, which will result in two things
-
-1) Emit event of form
-
-```js
-Verified(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, bytes[] message)
-```
-
-2) Remove entry from due_verification queue
-
-```js
-remove(queue[targetApp][sourceChainId][sourceApp], nonce)
-```
-
----
-
-We've transferred message **M** from **A1** running on **C1** to **A2** running on **C2**.
 
 ---
 
