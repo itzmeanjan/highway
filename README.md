@@ -153,6 +153,8 @@ You might have already seen field `hop` in `Highway.send(...)` method, which is 
 
 **⭐️ Now I'm going to propose two models**
 
+![architecture_offchain](./sc/architecture_offchain.jpg)
+
 - Push Model
 - Pull Model
 
