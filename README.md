@@ -106,8 +106,9 @@ function receive(...) {
         nonce,
         message
     }) // C2's built-in function for serializing object into byte array
+    var hashedMessage = hash(message) // C2's built-in function
 
-    if getSigner(message, signed) != oracle {
+    if getSigner(hashedMessage, signed) != oracle {
         // signature verification didn't pass
         return
     }
@@ -116,6 +117,8 @@ function receive(...) {
 ```
 
 > `serialize(...)` is same as what's used by **C2**'s oracle for serializing parts & signing message. **❗️ If not, signature verification won't work. ❗️**
+
+> `hash(...)` is a commonly agreed upon function being used by system for converting large message slice into 32-byte array, which is signed by **Oracle**. Primarily I'm using `keccak256`.
 
 It's obvious that receiving side also should keep some state for checking orderliness of messages received from sender.
 
