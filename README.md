@@ -155,10 +155,12 @@ You might have already seen field `hop` in `Highway.send(...)` method, which is 
 
 ![architecture_offchain](./sc/architecture_offchain.jpg)
 
-- Push Model
-- Pull Model
+- Push Model [ **Ordered Channel** ]
+- Pull Model [ **Unordered Channel** ]
 
 Let's talk more about them to understand how are they important for our protocol.
+
+---
 
 ### Push Model
 
@@ -179,5 +181,17 @@ So **A1** invokes `C1.Highway.send()` with `hop` address set to `U1` & let `U1` 
 I call it **PULL** based mechanism, because here `U1` plays role of **OFFCHAIN** entity, by pulling message(s) of its interest & passing it to `C2.Highway.receive(...)`.
 
 This is a suitable model, when you might not want to pay high tx cost of **C2**.
+
+---
+
+**Modification**
+
+Now after this point you may have understood we've a flaw in our state keeper data structure on `C2.Highway`, because it only allows delivery of messages in ordered form.
+
+For letting users pick their message of interest from **C1** & send it to **C2**, I'm going to propose a different data structure, where we're going to mark which `nonce` message is consumed on **C2** & which are not yet.
+
+> Please note, in last data structure diagram ( 👆 ), we used to keep last processed message's `nonce` & increment for next expected message. But this is not acceptable for **unordered channel**.
+
+![data_structure_receiver_unordered](./sc/data_structure_receiver_unordered.jpg)
 
 > **Specification writing in progress**
