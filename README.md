@@ -32,7 +32,7 @@ Let's say application **A1**, **A2** running on chain **C1**, **C2** respectivel
 Message(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, bytes[] message)
 ```
 
-We asume, in block **B1** of chain **C1**, tx **T1** is included. How this event log will be captured by **OFFCHAIN** entity i.e. `hop`, we'll see that in sometime.
+We also assume, in block **B1** of chain **C1**, tx **T1** is included. How this event log will be captured by **OFFCHAIN** entity i.e. `hop`, we'll see that in sometime.
 
 For emitting event of aforementioned form, we need to hold some state in `Highway` on **C1**.
 
@@ -60,18 +60,16 @@ function send(uint chainId, address app, byte[] message, address hop) {
 
 ---
 
-ℹ️ We've one imaginary **OFFCHAIN** entity for picking events emitted from `Highway` running on **C1** & reliably passing it to `Highway` running on **C2**, which is nothing but **hop**. How exactly these **OFFCHAIN** entities work, is a blackbox to us, as of now. We'll work on their specification, once we're done with **ONCHAIN** entities.
+ℹ️ For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by decentralised oracle network. _These oracles will only sign message, after verifying occurance of event **E1** in transaction **T1** included in block **B1** on chain **C1**._ `Highway` on **C2** only consumes message, if it finds majority of valid signatures from decentralised oracle network.
 
-For now, let's assume `hop` can be either an automated program/ real-user who will pick event log from **C1** & invoke `Highway`'s `receive` function on **C2**, after getting it signed by `Highway`'s trusted oracle. This oracle is an **OFFCHAIN** entity, which will only sign message to be passed, after verifying occurance of event on **C1**. `Highway` on **C2** only processes message, if it finds valid signature from its oracle, on a correctly ordered message.
-
-> It doesn't process same message more than once, by checking respective nonce of message.
+> `Highway` doesn't process same message > 1 times, by checking respective message nonce.
 
 ---
 
 Let's now step-by-step go through what happens, when `Highway` on **C2** receives message sent by **A1** of **C1**, in form
 
 ```js
-function receive(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message, byte[] signed) {
+function receive(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message, byte[][] sigs) {
 
     // ...
 
@@ -91,10 +89,10 @@ function receive(...) {
 }
 ```
 
-Now it'll verify signature, to check whether its oracle has signed received message or not. For doing so, it'll first construct message which was signed by oracle.
+For verifying signatures, it'll first need to construct message which was signed by oracle network.
 
 ```js
-var oracle = 0x<addr> // Truested party for gateway contract
+var oracles = []address // Oracle Network Participant Addresses
 
 function receive(...) {
     var message = serialize({
@@ -108,25 +106,35 @@ function receive(...) {
     }) // C2's built-in function for serializing object into byte array
     var hashedMessage = hash(message) // C2's built-in function
 
-    if getSigner(hashedMessage, signed) != oracle {
-        // signature verification didn't pass
+    var sigCount = 0 // how many are signed by registered oracles
+    for(var i = 0; i < len(sigs); i++) {
+
+        var signed = sigs[i]
+        if(getSigner(hashedMessage, signed) in oracles) {
+            sigCount++
+        }
+
+    }
+
+    if(sigCount <= len(oracles) / 2) {
+        // > 50% signature verification didn't pass
         return
     }
     // proceed
 }
 ```
 
-> `serialize(...)` is same as what's used by **C2**'s oracle for serializing parts & signing message. **❗️ If not, signature verification won't work. ❗️**
+> `serialize(...)` is same as what's used by oracle network for serializing parts & signing. **❗️ If not, signature verification won't work. ❗️**
 
-> `hash(...)` is a commonly agreed upon function being used by system for converting large message slice into 32-byte array, which is signed by **Oracle**. Primarily I'm using `keccak256`.
+> `hash(...)` is a commonly agreed upon function being used by system for converting large message slice into 32-byte array, which is signed by **Oracle Network**. Primarily I'm using `keccak256`.
 
-It's obvious that receiving side also should keep some state for checking orderliness of messages received from sender.
+It's obvious that receiving side also should keep some state for checking orderliness of messages received from sender. It'll also prevent it from consuming same message twice.
 
 Proposed data structure looks like
 
 ![data_structure_receiver](./sc/data_structure_receiver.jpg)
 
-If orderliness is tested to be passing, `Highway` will invoke `onReceive` method of **A2** running on **C2**.
+If orderliness is tested to be passing, `C2.Highway` will invoke `onReceive` method of **A2** running on **C2**.
 
 ```js
 function onReceive(uint chainId, address app, address hop, byte[] message) {
