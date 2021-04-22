@@ -122,7 +122,7 @@ It's obvious that receiving side also should keep some state for checking orderl
 
 Proposed data structure looks like
 
-![data_structure_receiver](./sc/data_structure_receiver.jpg)
+![data_structure_receiver_ordered](./sc/data_structure_receiver_ordered.jpg)
 
 If orderliness is tested to be passing, `C2.Highway` will invoke `onReceive` method of **A2** running on **C2**.
 
@@ -171,5 +171,35 @@ Now assume, target chain **C2** has high transaction cost issue, then it might b
 I call this model **PULL**-ing, because user pulls & submits tx.
 
 ---
+
+We've to make a small change in our orderliness keeper data structure on `Highway` i.e. we're making a distinction between two kinds of channels.
+
+In **Push Model** all messages passed from **C1 -> C2** are passed in ordered manner by **OFFCHAIN** entity, which is why **Push Model** uses preferably ordered channel.
+
+But in **Pull Model** users can just send transaction **T2** on chain **C2** with message of their interest. What it essentially results into message with nonce **1** might arrive before nonce with **0** comes to `C2.Highway`. In that case `C2.Highway` should drop that message, if it's ordered channel. But if we bring unordered channel into picture, we can allow this kind of message passing.
+
+> Note, none of Ordered/ Unordered channel processes message with same nonce twice.
+
+Structure for keeping message consumption information of unordered channel looks like
+
+![data_structure_receiver_unordered](./sc/data_structure_receiver_unordered.jpg)
+
+---
+
+Whenever a channel is created between application **A1** of chain **C1** & application **A2** of chain **C2**, it needs to be registered with `Highway` application running on respective chains. This will be required when receiving message from other side, for determining _does `Highway` need to respect orderly consumption of messages or it can just accept messages in any order_.
+
+I propose one method on `Highway` on-chain application, which will be used for registering channel between applications.
+
+```js
+function registerChannel(address localApp, uint remoteChainId, address remoteApp, bool ordered) {}
+```
+
+Invoking this method chain **C1**, helps `C1.Highway` to decide whether it's supposed to be respecting orderliness of messages from **C2.A2**. Same method needs to be invoked on **C2**, for letting `C2.Highway` know what should it do when it sees any message coming from **C1.A1** i.e. does it orderly processes them or let them get marked arbitrarily by nonce to just avoid > 1 time consumption.
+
+If `Highway` on any chain doesn't find any entry for preferred mode of operation of channel, it must reject those messages.
+
+Preferred mode of operation needs to be kept on-chain in structure looking like
+
+![data_structure_channel_mode](./sc/data_structure_channel_mode.jpg)
 
 > **Specification writing in progress**
