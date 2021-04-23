@@ -5,7 +5,7 @@ Cross Blockchain Message Passing Protocol
 
 ## Motivation
 
-We're living in a time when new blockchain(s) popping up every single day, due to ease of accessibility to framework(s) for creating chains. We've our assets now distributed across all those self-sovereign chains, each using some mechanism for reaching consensus. Some times these assets are not desired to be kept confined on a single chain rather they're intended to be moving across several chains seamlessly.
+We're living in a time when new blockchain(s) popping up every single day, due to ease of accessibility to framework(s) for creating chains. We've our assets living on those self-sovereign chains, each using some mechanism for reaching consensus. Some times these assets are not desired to be kept confined on a single chain rather they're intended to be moving across several chains seamlessly.
 
 This project is an attempt in creating a generic protocol for passing arbitrary messages in between applications running on two different chains. Their state can now be shared across multiple chains. I'll propose one design so that dApps running on different chains can talk to their peers over a reliable, (un-)ordered, authenticated, trustless _( **cause the lesser the better** )_ channel.
 
@@ -36,7 +36,7 @@ We also assume, in block **B1** of chain **C1**, tx **T1** is included. How this
 
 For emitting event of aforementioned form, we need to hold some state in `Highway` on **C1**.
 
-> Think of `Highway` on **C1** as a gateway to send message to outer world, where some outer world entity will pick it up, get it signed by majority of oracle network & send it to recipient chain's `Highway`, which will in turn attempt to verify it.
+> Think of `Highway` on **C1** as a gateway to send message to outer world, where some outer world entity will pick it up, get it signed by majority of oracle network & send it to recipient chain's `Highway`, which will attempt to verify it.
 
 For each dApp, on any possible chain _( != **C1** )_, to which any application on **C1** might ever want to send message, we're keeping some state using following data structure
 
@@ -62,9 +62,9 @@ function send(uint chainId, address app, byte[] message) {
 
 ℹ️ For now, let's assume a program will pick event log from **C1** _( which has interest in passing this message cross chain )_ & get it signed by majority of oracle network participants. 
 
-_They will only sign message, after verifying occurance of event **E1** in transaction **T1** included in block **B1** on chain **C1**._ 
+⚠️ _They will only sign message, after verifying occurance of event **E1** in transaction **T1** included in block **B1** on chain **C1**._
 
-As long as majority of these oracle network participants are honest & proposal is correct, it'll be signed. `Highway` on **C2** only consumes message, if it finds majority of valid signatures from decentralised oracle network & it's already aware of who're actual participants of oracle network.
+As long as majority of these oracle network participants are honest & proposal is correct, it'll be signed & propagated back to proposer. `Highway` on **C2** only consumes message, if it finds majority of valid signatures from decentralised oracle network & it's already aware of who're actual participants of oracle network.
 
 > `Highway` doesn't process same message > 1 times, by checking respective message nonce.
 
@@ -147,7 +147,7 @@ Now we'll define specification for how events emitted by **A1** running on **C1*
 
 When a new `Message(...)` event is seen to be emitted from **C1.Highway** one designated program picks it up, which itself is part of Oracle Network, & proposes it to Oracle Network participants for getting it signed. Oracle Network's each participant take independent decision by querying chain **C1**'s transaction **T1** included in block **B1** & checking whether event **E1** is present or not.
 
-If found positive, they'll sign `keccak256`-ed serialised ( yes, deterministic ) form of event **E1** with their private key & publish it to their peers over p2p network. Proposer collects majority of signatures & goes for submitting message, by passing transaction **T2** on chain **C2**.
+If found positive, they'll sign `keccak256`-ed serialised ( yes, deterministic ) form of event **E1** with their private key & publish signed message to their peers over p2p network. Proposer collects majority of signatures & goes for submitting message, by passing transaction **T2** on chain **C2**.
 
 ---
 
@@ -171,6 +171,8 @@ Now assume, target chain **C2** has high transaction cost issue, then it might b
 I call this model **PULL**-ing, because user pulls & submits tx.
 
 ---
+
+**Modification**
 
 We've to make a small change in our orderliness keeper data structure on `Highway` i.e. we're making a distinction between two kinds of channels.
 
@@ -201,5 +203,55 @@ If `Highway` on any chain doesn't find any entry for preferred mode of operation
 Preferred mode of operation needs to be kept on-chain in structure looking like
 
 ![data_structure_channel_mode](./sc/data_structure_channel_mode.jpg)
+
+---
+
+**Envisioned Setup Steps**
+
+For first time when `Highway` being deployed between chain **C1** & **C2**, there're a few steps which need to be followed
+
+- `C1.Highway` must primarily learn about who're participants of Oracle Network i.e. only majority of whose signed messages it'll be consuming
+    - This can be done by invoking one method in `C1.Highway`, where signed messages _( of a pre-agreed message format, by Oracle Network participants )_ needs to be passed. Method signature looks like
+
+    ```js
+    var oracles = []address
+    var message = []byte("HIGHWAY:${getChainId()}")
+
+    function registerOracles(byte[][] sigs) {
+
+        for(var i = 0; i < len(sigs); i++) {
+
+            var signed = sigs[i]
+            var signer = getSigner(message, signed)
+            oracles.push(signer)
+
+        }
+
+    }
+    ```
+
+    - Preagreed format is of form `HIGHWAY:<C1'S-UNIQUE-CHAIN-ID>`, because every participating chain is expected to have one unique chain id.
+    - Appending `chainId` to signed message prevents same signature from being used in multiple chain's `Highway.registerOracles(...)`
+    - Completion of this steps implicitly assumes two more things are done ✅
+        - At least one participant of oracle network has access to RPC URL of **C1**'s node, for picking events of form `Message(...)` & getting it signed by majority of oracle network [ **This plays role of a hop** ]
+        - All oracle network participants must have access to RPC URL of **C2**'s node for verifying inclusion of transaction **T2** in block **B2** of chain **C2**, which emitted event **E2**, that is being transmitted from **C2 -> C1**
+
+        > Yes, it needs to be done explicitly, but I assume it's done.
+
+- Now we're going to perform same set of steps in `C2.Highway`. Make sure you also give all oracle network participants access to RPC URL of **C1**'s node for them to be able verify before signing any message coming from chain **C1**. Also at least one oracle node must have access to **C2**'s RPC URL for picking messages, need to be transported cross-chain.
+- We need to think about how many oracle network participants are supposed to be present at minimum. More can be added later.
+- Starting with 5 oracle nodes
+    - 1 : for picking events from chain **C1** & proposing those to network for signing
+    - 1 : same as above, but for chain **C2**
+    - 3 : just mere participants, not representative of any chain
+- Let's now think of one scenario
+    - Application **A1** of chain **C1** is interested in talking to application **A2** of chain **C2** _( in full duplex manner )_, which is why we created aforementioned setting. So you can think of 2 among those 5 oracle nodes, are kind of respresentative of application **A1** & **A2**. Their interest is keeping this **HIGHWAY** clear between **C1.A1** & **C2.A2**, so that cars carrying message can be passing seamlessly 😅.
+    - Remember `Highway` can handle messages to & from any application **Ax** running on any chain **Cx**. Today **C1.A1** might be interested in talking to **A3** of chain **C3** _( yeah full duplex )_ then it should be able to do it very easily. It just requires few additions
+        - For consuming messages reliably from chain **C3**, oracle network nodes must learn about RPC URL of **C3**
+        - One new node will join oracle network so that it can pick events from on chain **C3** & propose it to oracle network participants, so that it can get it signed by them all.
+        > Yes, that's it 🎉
+    - After some time, application **A^** of chain **C1** might be interested in talking to chain **C3.A3**, now notice, oracle network nodes already know RPC URL of both participating chains i.e. **C1**, **C3**. So only one new node will join oracle network i.e. representative of **C1.A^** for picking events of its interest & getting it signed by oracle network participants, so that it can be sent to **C3.A3**. For messages coming from **C3.A3** there's already one representative of it which takes care of picking messages from event log of **C3.A3** & getting signed by network so that it can be reliably passed to **C1.A^** for consumption.
+- This way oracle network can keep growing. One question you're probably asking, 
+    - ❓ **Why should a oracle network participant bother itself about signing message coming from some chain/ application which is different that its own ?** Let's find it together.
 
 > **Specification writing in progress**
