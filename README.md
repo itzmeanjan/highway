@@ -26,24 +26,24 @@ Let's say application **A1**, **A2** running on chain **C1**, **C2** respectivel
 
 ---
 
-**A1** invokes `send(uint chainId, address app, byte[] message)` method of `Highway` dApp deployed on **C1**, as an effect of user triggered tx **T1**, which will result into emission of event log of below form
+**A1** invokes `send(uint chainId, address app, byte[] message, address hop)` method of `Highway` dApp deployed on **C1**, as an effect of user triggered tx **T1**, which will result into emission of event log of below form
 
 ```js
-Message(uint sourceChainId, address sourceApp, uint targetChainId, address targetApp, uint nonce, bytes[] message)
+Message(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, bytes[] message)
 ```
 
-We also assume, in block **B1** of chain **C1**, tx **T1** is included. How this event log will be captured by **OFFCHAIN** entity, we'll see that in sometime.
+We also assume, in block **B1** of chain **C1**, tx **T1** is included. How this event log will be captured by **OFFCHAIN** entity ( i.e. `hop` ), we'll see that in sometime.
 
 For emitting event of aforementioned form, we need to hold some state in `Highway` on **C1**.
 
-> Think of `Highway` on **C1** as a gateway to send message to outer world, where some outer world entity will pick it up, get it signed by majority of oracle network & send it to recipient chain's `Highway`, which will attempt to verify it.
+> Think of `Highway` on **C1** as a gateway to send message to outer world, where some outer world entity ( i.e. `hop` ) will pick it up, get it signed by majority of oracle network & send it to recipient chain's `Highway`, which will attempt to verify it.
 
 For each dApp, on any possible chain _( != **C1** )_, to which any application on **C1** might ever want to send message, we're keeping some state using following data structure
 
 ![data_structure_sender](./sc/data_structure_sender.jpg)
 
 ```js
-function send(uint chainId, address app, byte[] message) {
+function send(uint chainId, address app, byte[] message, address hop) {
 
     // -- book keeping, starts
     var sourceChainId = getChainId() // C1's built-in function
@@ -53,18 +53,18 @@ function send(uint chainId, address app, byte[] message) {
     var nonce = ... // figure it out from state keeper nested associative array
     // -- book keeping done
 
-    emit Message(sourceChainId, sourceApp, targetChainId, targetApp, nonce, message) // voila 🎉
+    emit Message(sourceChainId, sourceApp, hop, targetChainId, targetApp, nonce, message) // voila 🎉
 
 }
 ```
 
 ---
 
-ℹ️ For now, let's assume a program will pick event log from **C1** _( which has interest in passing this message cross chain )_ & get it signed by majority of oracle network participants. 
+ℹ️ For now, let's assume `hop` picks event log from **C1** _( which has interest in passing this message cross chain )_ & get it signed by majority of oracle network participants. 
 
 ⚠️ _They will only sign message, after verifying occurance of event **E1** in transaction **T1** included in block **B1** on chain **C1**._
 
-As long as majority of these oracle network participants are honest & proposal is correct, it'll be signed & propagated back to proposer. `Highway` on **C2** only consumes message, if it finds majority of valid signatures from decentralised oracle network & it's already aware of who're actual participants of oracle network.
+As long as majority of these oracle network participants are honest & proposal is correct, it'll be signed & propagated back to proposer `hop`. `Highway` on **C2** only consumes message, if it finds majority of valid signatures from decentralised oracle network & it's already aware of who're actual participants of oracle network.
 
 > `Highway` doesn't process same message > 1 times, by checking respective message nonce.
 
@@ -73,7 +73,7 @@ As long as majority of these oracle network participants are honest & proposal i
 Let's now step-by-step go through what happens, when `Highway` on **C2** receives message sent by **A1** of **C1**, in form
 
 ```js
-function receive(uint sourceChainId, address sourceApp, uint targetChainId, address targetApp, uint nonce, byte[] message, byte[][] sigs) {
+function receive(uint sourceChainId, address sourceApp, address hop, uint targetChainId, address targetApp, uint nonce, byte[] message, byte[][] sigs) {
 
     // ...
 
@@ -89,6 +89,7 @@ function receive(...) {
     var message = serialize({
         sourceChainId,
         sourceApp,
+        hop,
         targetChainId,
         targetApp,
         nonce,
@@ -145,9 +146,9 @@ Now we'll define specification for how events emitted by **A1** running on **C1*
 
 ---
 
-When a new `Message(...)` event is seen to be emitted from **C1.Highway** one designated program picks it up, which itself is part of Oracle Network, & proposes it to Oracle Network participants for getting it signed. Oracle Network's each participant take independent decision by querying chain **C1**'s transaction **T1** included in block **B1** & checking whether event **E1** is present or not.
+When a new `Message(...)` event is seen to be emitted from **C1.Highway** designated program i.e. `hop` picks it up, which itself is part of Oracle Network & proposes it to Oracle Network participants for getting it signed. Oracle Network's each participant take independent decision by querying chain **C1**'s transaction **T1** included in block **B1** & checking whether event **E1** is present or not.
 
-If found positive, they'll sign `keccak256`-ed serialised ( yes, deterministic ) form of event **E1** with their private key & publish signed message to their peers over p2p network. Proposer collects majority of signatures & goes for submitting message, by passing transaction **T2** on chain **C2**.
+If found positive, they'll sign `keccak256`-ed serialised ( yes, deterministic ) form of event **E1** with their private key & publish signed message to their peers over p2p network. Proposer node i.e. designated `hop` collects majority of signatures & goes for submitting message, by passing transaction **T2** on chain **C2**.
 
 ---
 
@@ -176,9 +177,9 @@ I call this model **PULL**-ing, because user pulls & submits tx.
 
 We've to make a small change in our orderliness keeper data structure on `Highway` i.e. we're making a distinction between two kinds of channels.
 
-In **Push Model** all messages passed from **C1 -> C2** are passed in ordered manner by **OFFCHAIN** entity, which is why **Push Model** uses preferably ordered channel.
+In **Push Model** all messages passed from **C1 -> C2** are passed in ordered manner by **OFFCHAIN** entity ( `hop` ), which is why **Push Model** uses ordered channel.
 
-But in **Pull Model** users can just send transaction **T2** on chain **C2** with message of their interest. What it essentially results into message with nonce **1** might arrive before nonce with **0** comes to `C2.Highway`. In that case `C2.Highway` should drop that message, if it's ordered channel. But if we bring unordered channel into picture, we can allow this kind of message passing.
+But in **Pull Model** users can just send transaction **T2** on chain **C2** with message of their interest. What it essentially results into, message with nonce **1** might arrive before nonce with **0** in `C2.Highway`. In that case `C2.Highway` should drop that message, if it's ordered channel. But if we bring unordered channel into picture, we can allow this kind of message passing.
 
 > Note, none of Ordered/ Unordered channel processes message with same nonce twice.
 
@@ -245,12 +246,12 @@ For first time when `Highway` being deployed between chain **C1** & **C2**, ther
     - +1 : same as above, but for chain **C2**
     - +3 : just mere participants, not representative of any chain, simply checks & signs after finding everything **OKAY**
 - Let's now think of one scenario
-    - Application **A1** of chain **C1** is interested in talking to application **A2** of chain **C2** _( in full duplex manner )_, which is why we created aforementioned setting. So you can think of 2 among those 5 oracle nodes, are kind of respresentative of application **A1** & **A2**. Their interest is keeping this **HIGHWAY** clear between **C1.A1** & **C2.A2**, so that cars carrying message can be passing seamlessly 😅.
+    - Application **A1** of chain **C1** is interested in talking to application **A2** of chain **C2** _( in full duplex manner )_, which is why we created aforementioned setting. So you can think of 2 among those 5 oracle nodes, are kind of respresentative of application **A1** & **A2** ( actually `hop`(s) ). Their interest is keeping this **HIGHWAY** clear between **C1.A1** & **C2.A2**, so that cars carrying message can be passing seamlessly 😅.
     - Remember `Highway` can handle messages to & from any application **Ax** running on any chain **Cx**. Today **C1.A1** might be interested in talking to **A3** of chain **C3** _( yeah full duplex )_ then it should be able to do it very easily. It just requires few additions
         - For consuming messages reliably from chain **C3**, oracle network nodes must learn about RPC URL of **C3**
         - One new node will join oracle network so that it can pick events from on chain **C3** & propose it to oracle network participants, so that it can get it signed by them all.
         > Yes, that's it 🎉
-    - After some time, application **A^** of chain **C1** might be interested in talking to chain **C3.A3**, now notice, oracle network nodes already know RPC URL of both participating chains i.e. **C1**, **C3**. So only one new node will join oracle network i.e. representative of **C1.A^** for picking events of its interest & getting it signed by oracle network participants, so that it can be sent to **C3.A3**. For messages coming from **C3.A3** there's already one representative of it which takes care of picking messages from event log of **C3.A3** & getting signed by network so that it can be reliably passed to **C1.A^** for consumption.
+    - After some time, application **A^** of chain **C1** might be interested in talking to chain **C3.A3**, now notice, oracle network nodes already know RPC URL of both participating chains i.e. **C1**, **C3**. So only one new node will join oracle network i.e. representative of **C1.A^** ( actually `hop` node ) for picking events of its interest & getting it signed by oracle network participants, so that it can be sent to **C3.A3**. For messages coming from **C3.A3** there's already one representative of it which takes care of picking messages from event log of **C3.A3** & getting signed by network so that it can be reliably passed to **C1.A^** for consumption.
 - This way oracle network can keep growing. One question you're probably asking, 
     - ❓ **Why should a oracle network participant bother itself about signing message coming from some chain/ application which is different that its own ?** Let's find it together.
 
