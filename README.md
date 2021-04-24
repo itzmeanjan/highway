@@ -198,7 +198,7 @@ function registerChannel(address localApp, uint remoteChainId, address remoteApp
 
 Invoking this method chain **C1**, helps `C1.Highway` to decide whether it's supposed to be respecting orderliness of messages from **C2.A2**. Same method needs to be invoked on **C2**, for letting `C2.Highway` know what should it do when it sees any message coming from **C1.A1** i.e. does it orderly processes them or let them get marked arbitrarily by nonce to just avoid > 1 time consumption.
 
-If `Highway` on any chain doesn't find any entry for preferred mode of operation of channel, it must reject those messages.
+**If `Highway` on any chain doesn't find any entry for preferred mode of operation of channel, it must reject those messages, when it's asked to consume those.** 👍
 
 Preferred mode of operation needs to be kept on-chain in structure looking like
 
@@ -239,11 +239,11 @@ For first time when `Highway` being deployed between chain **C1** & **C2**, ther
         > Yes, it needs to be done explicitly, but I assume it's done.
 
 - Now we're going to perform same set of steps in `C2.Highway`. Make sure you also give all oracle network participants access to RPC URL of **C1**'s node for them to be able verify before signing any message coming from chain **C1**. Also at least one oracle node must have access to **C2**'s RPC URL for picking messages, need to be transported cross-chain.
-- We need to think about how many oracle network participants are supposed to be present at minimum. More can be added later.
+- We need to think about how many oracle network participants are supposed to be present at beginning. More can be added later.
 - Starting with 5 oracle nodes
-    - 1 : for picking events from chain **C1** & proposing those to network for signing
-    - 1 : same as above, but for chain **C2**
-    - 3 : just mere participants, not representative of any chain
+    - +1 : for picking events from chain **C1** & proposing those to network for signing
+    - +1 : same as above, but for chain **C2**
+    - +3 : just mere participants, not representative of any chain, simply checks & signs after finding everything **OKAY**
 - Let's now think of one scenario
     - Application **A1** of chain **C1** is interested in talking to application **A2** of chain **C2** _( in full duplex manner )_, which is why we created aforementioned setting. So you can think of 2 among those 5 oracle nodes, are kind of respresentative of application **A1** & **A2**. Their interest is keeping this **HIGHWAY** clear between **C1.A1** & **C2.A2**, so that cars carrying message can be passing seamlessly 😅.
     - Remember `Highway` can handle messages to & from any application **Ax** running on any chain **Cx**. Today **C1.A1** might be interested in talking to **A3** of chain **C3** _( yeah full duplex )_ then it should be able to do it very easily. It just requires few additions
@@ -254,4 +254,63 @@ For first time when `Highway` being deployed between chain **C1** & **C2**, ther
 - This way oracle network can keep growing. One question you're probably asking, 
     - ❓ **Why should a oracle network participant bother itself about signing message coming from some chain/ application which is different that its own ?** Let's find it together.
 
-> **Specification writing in progress**
+---
+
+#### Reputation based Decentralised Oracle Network
+
+I propose one reputation based mechanism for aforementioned oracle network to operate in. Let's start by taking a look at one possible setup of `Highway`.
+
+There're 3 independent chains i.e. **C1, C2, C3** & dApp **A1, A2, A3** running on those chains respectively, while following full duplex communication channels have been setup.
+
+- **C1.A1 <-> C2.A2**
+- **C1.A1 <-> C3.A3**
+- **C2.A2 <-> C3.A3**
+
+There're 6 oracle network participants.
+
+- +1 : Designated event **E1** picker from **C1.Highway** & proposes
+- +1 : Designated event **E2** picker from **C2.Highway** & proposes
+- +1 : Designated event **E3** picker from **C3.Highway** & proposes
+- +3 : Not from any side, just follows protocol
+
+For passing event **E1** of **C1.A1** to **C2.A2**
+
+1) Designated hop of **C1** picks event **E1** & invokes `propagateMessage(...)` routine to send it to all participants of oracle network, who're supposed to be verifying & signing it.
+2) On reception of this message, each of recepient oracle nodes will first increment reputation of sender node by 1.
+
+> 🔆 Every node maintains a reputation table, which records how does it see other network participants i.e. how much respectful does it find other peers of it ?
+
+3) After that each of them will invoke `propagateMessage(...)` for propagating to all other network participants.
+4) Each of participants now expect to hear back from others with `propagateMessage(...)` call for message **M**. On reception of that expected message they'll update their own view towards other members of network by incrementing respective reputation. If they don't hear back from members _( within a stipulated timeperiod )_, whom it expected to respond back to it, their reputation will be decremented by 1.
+
+> We'll define `stipulated timeperiod`.
+
+5) Now each participant who received & sent `propagateMessage(...)` is going to check inclusion of event **E1** in transaction **T1** in block **B1** of chain **C1**. If it finds included, it'll invoke `propagateSignedMessage(...)` to all other participants. Otherwise it'll invoke special `BAD_MESSAGE(...)` & propagate throughout network.
+6) Each of them now expect to hear back from other peers. If they hear back, with correct message, their reputation will be incremented by 1. If not heard back, respective reputation will be decremented by 1. If heard back with wrong message, they'll be slashed, by negating their earned reputation.
+
+> `Stipulated timeperiod` : As soon as a message is received from a peer for first time, it'll be acted on & propagated back to network, after that a timer of **N seconds** started off & expected to hear back from all parties before that timer reaches 0. If not heard, their reputation to be decremented as per rule specified.
+
+A visual representation of how it works
+
+![architecture_oracle](./sc/architecture_oracle.jpg)
+
+I mentioned when some peer behaves in a bad way, image of that peer in eye of other peers, goes down. How exactly does it happen, it requires an explanation.
+
+Say message **M** is being propagated for asking peers for signature by some participant. There're two possibilities, either **M** is correct or incorrect, which can be checked by participants. 
+
+If **M** is correct,
+
+- All participants should propagate it to other peers over p2p network in attempt to get their reputation incremented. Also when they receive propagated message with in stipulated time period, they increment their respect towards peer. Rule is, just increment by **1** or decrement by **1** in case not received in stipuated time period.
+- Check inclusion of event in occurring chain & sign it _( it's included in chain because it's a good message )_. Propagate it to other peers & expect same from others, when received, increment reputation by **1**. Those who found to be not responding back, slash them by decrementing reputation by 1.
+
+> Some parties might also report a good message to be a **BAD_MESSAGE**, then other's will decrement their reputation towards reporting node. Actually reputation is negated if not negative already, otherwise follow `reputation = reputation * 4`.
+
+If **M** is incorrect i.e. is not included on chain,
+
+- All participants should propagate it to other network participants so that their view in peer's eye get more respectful. They also wait for receiving same message from peers, when received in stipuated time window, respect is incremented by 1, if not received it's decremented by 1.
+- Check if included on chain or not. As this is a bad message, every participant is expected to be reporting **BAD_MESSAGE**. If found to be doing, reputation of their's in eye of receipient node is incremented by 1. If not found to be reporting anything, their reputation is slashed by half. If some peer try to propagate one **BAD_MESSAGE** as good message, their reputation is also decremented by half.
+- The peer which proposed this message, is slashed for trying to sign a bad message by network.
+
+> ℹ️ Use `reputation = reputation * 4`, when reputation < 0, in case found to be supporting `BAD_MESSAGE` i.e. trying to be propagating it as good message.
+
+**Specification writing in progress, implementation yet to start**
