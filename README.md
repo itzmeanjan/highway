@@ -282,36 +282,47 @@ For passing event **E1** of **C1.A1** to **C2.A2**
 > 🔆 Every node maintains a reputation table, which records how does it see other network participants i.e. how much respectful does it find other peers of it ?
 
 3) After that each of them will invoke `propagateMessage(...)` for propagating to all other network participants.
-4) Each of participants now expect to hear back from others with `propagateMessage(...)` call for message **M**. On reception of that expected message they'll update their own view towards other members of network by incrementing respective reputation. If they don't hear back from members _( within a stipulated timeperiod )_, whom it expected to respond back to it, their reputation will be decremented by 1.
+4) Each of participants now expect to hear back from others with `propagateMessage(...)` call for message **M**. On reception of that expected message they'll update their own view towards other members of network by incrementing respective reputation. If they don't hear back from members _( within a stipulated timeperiod )_, whom it expected to respond back to it, their reputation will be decremented.
 
 > We'll define `stipulated timeperiod`.
 
 5) Now each participant who received & sent `propagateMessage(...)` is going to check inclusion of event **E1** in transaction **T1** in block **B1** of chain **C1**. If it finds included, it'll invoke `propagateSignedMessage(...)` to all other participants. Otherwise it'll invoke special `BAD_MESSAGE(...)` & propagate throughout network.
-6) Each of them now expect to hear back from other peers. If they hear back, with correct message, their reputation will be incremented by 1. If not heard back, respective reputation will be decremented by 1. If heard back with wrong message, they'll be slashed, by negating their earned reputation.
+6) Each of them now expect to hear back from other peers. If they hear back, with correct message, their reputation will be incremented. If not heard back, respective reputation will be decremented.
 
-> `Stipulated timeperiod` : As soon as a message is received from a peer for first time, it'll be acted on & propagated back to network, after that a timer of **N seconds** started off & expected to hear back from all parties before that timer reaches 0. If not heard, their reputation to be decremented as per rule specified.
+> `Stipulated timeperiod` : As soon as a message is received from `hop` for first time, it'll be acted on & propagated back to network, after that a timer of **N seconds** started off & expected to hear back from all parties before that timer reaches 0. If not heard, their reputation to be decremented as per rule specified. Same happens in second phase of protocol.
 
 A visual representation of how it works
 
 ![architecture_oracle](./sc/architecture_oracle.jpg)
 
-I mentioned when some peer behaves in a bad way, image of that peer in eye of other peers, goes down. How exactly does it happen, it requires an explanation.
+The mantra is, **Rather than relying on peers to learn how they view world around them, view it from your own perspective with trust on self**.
 
-Say message **M** is being propagated for asking peers for signature by some participant. There're two possibilities, either **M** is correct or incorrect, which can be checked by participants. 
+Reputation of a peer in eye of another either increments or decrements depending upon how they behave during protocol execution. All good peers are going to be behaving well so their reputation will get incremented in eye of other participants. But for bad peers, who are malice, their reputation in eye of good peers will get decrementeed, due to found misalignment in their activities.
 
-If **M** is correct,
+Here I present one table on how rewarding with more reputation or slashing by lowering reputation can be done
 
-- All participants should propagate it to other peers over p2p network in attempt to get their reputation incremented. Also when they receive propagated message with in stipulated time period, they increment their respect towards peer. Rule is, just increment by **1** or decrement by **1** in case not received in stipuated time period.
-- Check inclusion of event in occurring chain & sign it _( it's included in chain because it's a good message )_. Propagate it to other peers & expect same from others, when received, increment reputation by **1**. Those who found to be not responding back, slash them by decrementing reputation by 1.
+Step | Followed protocol | Didn't follow protocol
+--- | --: | --:
+`propagateMessage(...)` | +1 | -1
+`propagateSignedMessage(...)` | +1 | -1
+`BAD_MESSAGE(...)` | +1 | -1
 
-> Some parties might also report a good message to be a **BAD_MESSAGE**, then other's will decrement their reputation towards reporting node. Actually reputation is negated if not negative already, otherwise follow `reputation = reputation * 4`.
+`hop` who proposes bad message, will be slashed heavily, it's reputation score can be updated using
 
-If **M** is incorrect i.e. is not included on chain,
+```js
+var reputation = getReputationOfPeer(hop)
 
-- All participants should propagate it to other network participants so that their view in peer's eye get more respectful. They also wait for receiving same message from peers, when received in stipuated time window, respect is incremented by 1, if not received it's decremented by 1.
-- Check if included on chain or not. As this is a bad message, every participant is expected to be reporting **BAD_MESSAGE**. If found to be doing, reputation of their's in eye of receipient node is incremented by 1. If not found to be reporting anything, their reputation is slashed by half. If some peer try to propagate one **BAD_MESSAGE** as good message, their reputation is also decremented by half.
-- The peer which proposed this message, is slashed for trying to sign a bad message by network.
+if(reputation > 0) {
+    reputation = -reputation
+} 
+else if (reputation == 0) {
+    reputation = -100
+}
+else {
+    reputation = 4 * reputation
+}
+```
 
-> ℹ️ Use `reputation = reputation * 4`, when reputation < 0, in case found to be supporting `BAD_MESSAGE` i.e. trying to be propagating it as good message.
+When some `hop` proposes one message for getting it signed by network, its reputation to be checked first, if found to be negative, message to be dropped. All good participants to behave that way i.e. bad participant now needs to gain reputation again by behaving well in network & participants to consider its request when they find its reputation score is not anymore **< 0**.
 
 **Specification writing in progress, implementation yet to start**
